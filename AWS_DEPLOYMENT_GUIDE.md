@@ -51,7 +51,8 @@ Before touching AWS, the app itself was built at [`02-springboot-project/employe
 
 Tested locally end-to-end with Postman — creating an employee via `POST /api/employees` and reading it back via `GET /api/employees` both returning `200 OK` with the expected JSON.
 
-> 📸 **Screenshot needed:** `docs/screenshots/00-postman-collection.png` — Postman request/response for the employee CRUD flow.
+<img width="1756" height="1354" alt="image" src="https://github.com/user-attachments/assets/aba68d9e-8407-4376-bf72-82ee28bf18b8" />
+
 
 ---
 
@@ -80,7 +81,8 @@ aws_access_key_id = YOUR_ACCESS_KEY_ID
 aws_secret_access_key = YOUR_SECRET_ACCESS_KEY
 ```
 
-> 📸 **Screenshot needed:** `docs/screenshots/01-iam-user.png` — the IAM user's summary page, Permissions tab, showing the two attached policies.
+<img width="2932" height="1494" alt="image" src="https://github.com/user-attachments/assets/5c86f6c9-32bd-4ce2-a329-aede49ecc9f2" />
+
 
 ### ✅ Step 2 — Create Key Pair
 
@@ -114,13 +116,18 @@ A key pair isn't tied to one instance or one project — this same `springboot-k
 10. Note the **Public IPv4 address** from the instance details page.
 11. SSH in:
 
+<img width="2914" height="1324" alt="image" src="https://github.com/user-attachments/assets/4cd17f5b-d24e-4dd1-82cf-1a5835a536ed" />
+
 ```bash
 ssh -i ~/.ssh/aws-keys/springboot-key.pem ubuntu@<PUBLIC_IP>
 ```
 
 Launched as a *second*, dedicated instance rather than reusing an EC2 already running an unrelated project — keeps the two isolated (no port collisions, a crash in one doesn't affect the other).
 
-> 📸 **Screenshot needed:** `docs/screenshots/03-ec2-launch-review.png` — the "Launch instance" review pane showing AMI, instance type, and security group summary.
+
+<img width="1848" height="890" alt="image" src="https://github.com/user-attachments/assets/e4a71f9a-a016-4b3b-a36e-c8cbbef362c2" />
+
+
 
 ### ✅ Step 4 — Install Java
 
@@ -139,7 +146,8 @@ sudo apt install -y maven
 mvn -version
 ```
 
-> 📸 **Screenshot needed:** `docs/screenshots/04-java-maven-version.png` — terminal output of `java -version` and `mvn -version`.
+<img width="1816" height="494" alt="image" src="https://github.com/user-attachments/assets/2f69f9bf-dc18-4669-8e4c-7d494634c498" />
+`
 
 ### ✅ Step 5 — Create RDS (instead of local MySQL)
 
@@ -160,7 +168,8 @@ Chose RDS over installing MySQL locally on the instance, since RDS is the actual
    - **VPC security group**: create new, `launch-wizard-2` (auto-named).
 9. **Create database** — takes a few minutes to reach `Available`.
 
-> 📸 **Screenshot needed:** `docs/screenshots/05-rds-summary.png` — the RDS instance Summary panel (status, class, engine).
+<img width="2940" height="948" alt="image" src="https://github.com/user-attachments/assets/9100ea81-8ddb-421c-86b2-df28660b9d81" />
+
 
 **Networking:**
 
@@ -169,7 +178,8 @@ Chose RDS over installing MySQL locally on the instance, since RDS is the actual
 3. Source: select **the EC2 instance's security group** (`launch-wizard-4`) from the dropdown — not a raw IP. This means "only things using that security group can reach me."
 4. **Save rules**.
 
-> 📸 **Screenshot needed:** `docs/screenshots/06-rds-security-group-rules.png` — the RDS SG's inbound rules table showing the MySQL/Aurora rule sourced from the EC2 SG.
+<img width="2352" height="600" alt="image" src="https://github.com/user-attachments/assets/472fca5c-14af-400a-80e0-3e24bf8b67ba" />
+
 
 **Isolated schema + user:** this RDS instance also hosts an unrelated project's database, so rather than reusing the master (`admin`) credentials, created a dedicated schema and user scoped only to this project.
 
@@ -205,12 +215,13 @@ export DB_PASSWORD="********"
 export JWT_SECRET="********"
 
 mvn clean package -DskipTests
-java -jar target/employee-service-1.0.0.jar
+nohup java -jar target/employee-service-1.0.0.jar > employee-service.log 2>&1 &
 ```
 
 (Adding those `export` lines to `~/.bashrc` keeps them set across future SSH sessions, rather than re-exporting every time.)
 
-> 📸 **Screenshot needed:** `docs/screenshots/07-app-startup-logs.png` — terminal showing the Spring Boot banner, `HikariPool-1 - Start completed`, and `Tomcat started on port(s): 8081`.
+<img width="2882" height="988" alt="image" src="https://github.com/user-attachments/assets/9c73a488-aee5-4d8f-86c5-9d815e2e1fdd" />
+
 
 ### ✅ Step 7 — Configure Security Group
 
@@ -224,7 +235,8 @@ java -jar target/employee-service-1.0.0.jar
 
 To add a rule: open the SG → **Edit inbound rules** → **Add rule** (don't remove existing ones) → set Type/Port/Source → **Save rules**.
 
-> 📸 **Screenshot needed:** `docs/screenshots/07b-ec2-security-group-rules.png` — the EC2 SG's inbound rules table showing all three rules above.
+<img width="2940" height="1232" alt="image" src="https://github.com/user-attachments/assets/dc2c175a-d55e-4d22-bbdd-90c257070285" />
+
 
 ### ✅ Step 8 — Test Application
 
@@ -251,8 +263,6 @@ How this will be done, following the same pattern as [`springboot-s3-demo`](../s
 
 ### ⏳ Step 10 — Create IAM Role for EC2
 
-*Not yet done.* Currently the app has no AWS SDK credentials configured on the instance.
-
 Planned approach (an IAM Role, not static access keys, since roles auto-rotate credentials and never live in a file on disk):
 
 1. **IAM** → **Roles** → **Create role**.
@@ -260,6 +270,8 @@ Planned approach (an IAM Role, not static access keys, since roles auto-rotate c
 3. Attach policy: `AmazonS3FullAccess` (or a scoped-down custom policy limited to the specific bucket).
 4. Name it, e.g. `employee-service-ec2-role`.
 5. Attach it to the running instance: **EC2** → select `employee-service-server` → **Actions** → **Security** → **Modify IAM role** → select `employee-service-ec2-role`.
+   <img width="2940" height="1130" alt="image" src="https://github.com/user-attachments/assets/b4c40df2-6af8-4b9c-9896-c8cf83f152e3" />
+
 
 ### ⏳ Step 11 — Upload Files to S3
 
