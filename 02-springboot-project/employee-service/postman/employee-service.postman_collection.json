@@ -125,6 +125,33 @@
             "method": "DELETE",
             "url": "{{baseUrl}}/api/employees/{{employeeId}}"
           }
+        },
+        {
+          "name": "Upload Profile Picture",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/employees/{{employeeId}}/profile-picture",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": [] }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Profile Picture URL",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/employees/{{employeeId}}/profile-picture"
+          }
+        },
+        {
+          "name": "Delete Profile Picture",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/employees/{{employeeId}}/profile-picture"
+          }
         }
       ]
     },

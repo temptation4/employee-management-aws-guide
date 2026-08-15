@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -41,6 +42,24 @@ public class EmployeeController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         employeeService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{id}/profile-picture")
+    public ResponseEntity<String> uploadProfilePicture(@PathVariable Long id,
+                                                         @RequestPart("file") MultipartFile file) {
+        employeeService.uploadProfilePicture(id, file);
+        return ResponseEntity.ok("Profile picture uploaded successfully.");
+    }
+
+    @GetMapping("/{id}/profile-picture")
+    public ResponseEntity<String> getProfilePictureUrl(@PathVariable Long id) {
+        return ResponseEntity.ok(employeeService.getProfilePictureUrl(id));
+    }
+
+    @DeleteMapping("/{id}/profile-picture")
+    public ResponseEntity<Void> deleteProfilePicture(@PathVariable Long id) {
+        employeeService.deleteProfilePicture(id);
         return ResponseEntity.noContent().build();
     }
 }

@@ -20,11 +20,11 @@ flowchart LR
     ALB --> TG
     TG --> EC2
     EC2 -->|JDBC :3306\nemployee_svc user| RDS
+    EC2 -->|IAM role\nemployee-service-ec2-role| S3
 
-    S3[("S3 Bucket\n(Step 9-11 — planned)")]
+    S3[("S3 Bucket\nneelu-employee-profile-images-2026")]
     ASG["Auto Scaling Group\n(Step 13 — planned)"]
     CW["CloudWatch Alarm\n(Step 14 — planned)"]
-    EC2 -.->|not yet wired| S3
     ALB -.->|planned| ASG
     ASG -.-> EC2
     CW -.->|monitors| ASG
@@ -248,17 +248,13 @@ curl http://<EC2_PUBLIC_IP>:8081/health
 
 Also exercised the full CRUD + auth flow via Postman: register → login (JWT returned) → create/read/update/delete an employee, all against the live EC2-hosted app.
 
-### ⏳ Step 9 — Create S3 Bucket
-
-*Not yet wired into the app — a bucket already exists from earlier, planned for profile-picture upload.*
-
-How this will be done, following the same pattern as [`springboot-s3-demo`](../springboot-s3-demo):
+### ✅ Step 9 — Create S3 Bucket
 
 1. **S3** → **Create bucket**.
-2. Bucket name must be globally unique, e.g. `employee-service-profile-images-<suffix>`.
-3. Region: same as the rest of the infrastructure (`eu-north-1`).
-4. Block Public Access: leave **all four boxes checked** (block all public access) — access will go through the app using pre-signed URLs, not public bucket policies.
-5. **Create bucket**.
+2. Bucket name: `neelu-employee-profile-images-2026` (globally unique).
+3. Region: `eu-north-1`, same as the rest of the infrastructure.
+4. Block Public Access: left **all four boxes checked** (block all public access) — access goes through the app using pre-signed URLs, not public bucket policies.
+5. **Create bucket**, then created an `employees/` prefix (folder) for object organization.
 
 ### ✅ Step 10 — Create IAM Role for EC2
 
@@ -273,9 +269,40 @@ Used an IAM Role rather than static access keys, since roles auto-rotate credent
 <img width="2940" height="1130" alt="image" src="https://github.com/user-attachments/assets/b4c40df2-6af8-4b9c-9896-c8cf83f152e3" />
 
 
-### ⏳ Step 11 — Upload Files to S3
+### ✅ Step 11 — Upload Files to S3
 
-*Depends on Steps 9 and 10.* Will add an `S3Service` (mirroring the one in `springboot-s3-demo`) and wire it into `EmployeeService` for profile-picture upload/download/delete via pre-signed URLs.
+Wired into the app, mirroring the pattern from [`springboot-s3-demo`](../springboot-s3-demo):
+
+- `S3Config` — `S3Client`/`S3Presigner` beans, region from `aws.region`. No explicit credentials configured — the AWS SDK's default credential chain automatically picks up the IAM role attached to the EC2 instance in Step 10.
+- `S3Service` (interface) / `S3ServiceImpl` — `uploadFile`, `generatePreSignedUrl` (10-minute expiry), `deleteFile`, all scoped to the `aws.bucket` property.
+- `Employee` entity gained a `profilePictureKey` field; `EmployeeResponse` exposes it as a `hasProfilePicture` boolean rather than the raw S3 key.
+- New endpoints on `EmployeeController`:
+  - `POST /api/employees/{id}/profile-picture` — multipart upload, stores at `employees/{id}/{filename}`
+  - `GET /api/employees/{id}/profile-picture` — returns a pre-signed download URL
+  - `DELETE /api/employees/{id}/profile-picture` — removes from S3 and clears the key
+
+```bash
+export AWS_REGION="eu-north-1"
+export AWS_S3_BUCKET="neelu-employee-profile-images-2026"
+```
+
+(Only needed if overriding the defaults already baked into `application.properties` — no AWS access keys required on the instance, since the IAM role handles authentication.)
+
+**Verified end-to-end via Postman:**
+
+1. `POST /api/employees/{id}/profile-picture` (multipart, key `file`) → `200 OK`, "Profile picture uploaded successfully."
+
+> 📸 **Screenshot needed:** `docs/screenshots/11-s3-upload-success.png` — Postman: the upload request/response.
+
+2. Confirmed the object landed in the bucket at `employees/{id}/{filename}`.
+
+> 📸 **Screenshot needed:** `docs/screenshots/12-s3-bucket-object.png` — S3 console showing the uploaded object inside `employees/{id}/`.
+
+3. `GET /api/employees/{id}/profile-picture` → returned a presigned URL; opening it in a browser tab loaded the image directly from S3.
+
+> 📸 **Screenshot needed:** `docs/screenshots/13-s3-presigned-url-image.png` — browser tab showing the image loaded from the presigned URL.
+
+4. `GET /api/employees/{id}` → `hasProfilePicture` now `true`.
 
 ### ✅ Step 12 — Create ALB
 
@@ -341,19 +368,21 @@ Traffic now flows: **Client → ALB (port 80) → Target Group → EC2 (port 808
 
 In order:
 
-1. **Step 9, 11** — S3 bucket wiring: profile-picture upload/download endpoints (IAM role already attached in Step 10)
-2. **Step 13** — Auto Scaling Group
-3. **Step 14** — CloudWatch alarm
-4. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
+1. **Step 13** — Auto Scaling Group
+2. **Step 14** — CloudWatch alarm
+3. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
 
 ---
 
 ## Screenshot Checklist
 
-Three remaining — save into `docs/screenshots/` (or attach directly on GitHub the same way as the others) with the filename below, then let me know and I'll wire them in:
+Six remaining — save into `docs/screenshots/` (or attach directly on GitHub the same way as the others) with the filename below, then let me know and I'll wire them in:
 
 | Filename | What it should show |
 |---|---|
 | `08-target-group-healthy.png` | Target Group page showing 1 Healthy |
 | `09-alb-active.png` | Load Balancers list, `employee-service-alb` = Active |
 | `10-curl-via-alb.png` | Terminal: `curl` through the ALB DNS returning `OK` |
+| `11-s3-upload-success.png` | Postman: profile-picture upload request/response (`200 OK`) |
+| `12-s3-bucket-object.png` | S3 console: uploaded object inside `employees/{id}/` |
+| `13-s3-presigned-url-image.png` | Browser tab showing the image loaded from the presigned URL |

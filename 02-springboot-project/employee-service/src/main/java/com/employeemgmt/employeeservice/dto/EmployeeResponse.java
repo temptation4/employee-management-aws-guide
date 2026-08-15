@@ -12,4 +12,5 @@ public class EmployeeResponse {
     private String email;
     private String department;
     private String designation;
+    private boolean hasProfilePicture;
 }
