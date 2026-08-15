@@ -41,6 +41,14 @@ flowchart TB
     ALB -.->|planned| ASG
     ASG -.-> EC2
     CW -.->|monitors CPU| ASG
+
+    classDef gray fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A;
+    classDef blue fill:#E6F1FB,stroke:#185FA5,color:#042C53;
+    classDef teal fill:#E1F5EE,stroke:#0F6E56,color:#04342C;
+
+    class Client,Internet,IGW,ASG,CW gray
+    class ALB,TG,EC2 blue
+    class RDS,S3 teal
 ```
 
 **Security groups involved:**
