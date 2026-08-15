@@ -147,7 +147,6 @@ mvn -version
 ```
 
 <img width="1816" height="494" alt="image" src="https://github.com/user-attachments/assets/2f69f9bf-dc18-4669-8e4c-7d494634c498" />
-`
 
 ### ✅ Step 5 — Create RDS (instead of local MySQL)
 
@@ -261,16 +260,17 @@ How this will be done, following the same pattern as [`springboot-s3-demo`](../s
 4. Block Public Access: leave **all four boxes checked** (block all public access) — access will go through the app using pre-signed URLs, not public bucket policies.
 5. **Create bucket**.
 
-### ⏳ Step 10 — Create IAM Role for EC2
+### ✅ Step 10 — Create IAM Role for EC2
 
-Planned approach (an IAM Role, not static access keys, since roles auto-rotate credentials and never live in a file on disk):
+Used an IAM Role rather than static access keys, since roles auto-rotate credentials and never live in a file on disk:
 
 1. **IAM** → **Roles** → **Create role**.
 2. Trusted entity type: `AWS service` → Use case: `EC2`.
-3. Attach policy: `AmazonS3FullAccess` (or a scoped-down custom policy limited to the specific bucket).
-4. Name it, e.g. `employee-service-ec2-role`.
-5. Attach it to the running instance: **EC2** → select `employee-service-server` → **Actions** → **Security** → **Modify IAM role** → select `employee-service-ec2-role`.
-   <img width="2940" height="1130" alt="image" src="https://github.com/user-attachments/assets/b4c40df2-6af8-4b9c-9896-c8cf83f152e3" />
+3. Attached policy: `AmazonS3FullAccess`.
+4. Named it `employee-service-ec2-role`.
+5. Attached it to the running instance: **EC2** → select `employee-service-server` → **Actions** → **Security** → **Modify IAM role** → select `employee-service-ec2-role`.
+
+<img width="2940" height="1130" alt="image" src="https://github.com/user-attachments/assets/b4c40df2-6af8-4b9c-9896-c8cf83f152e3" />
 
 
 ### ⏳ Step 11 — Upload Files to S3
@@ -341,7 +341,7 @@ Traffic now flows: **Client → ALB (port 80) → Target Group → EC2 (port 808
 
 In order:
 
-1. **Step 9-11** — S3 bucket wiring: IAM role for EC2, profile-picture upload/download endpoints
+1. **Step 9, 11** — S3 bucket wiring: profile-picture upload/download endpoints (IAM role already attached in Step 10)
 2. **Step 13** — Auto Scaling Group
 3. **Step 14** — CloudWatch alarm
 4. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
@@ -350,18 +350,10 @@ In order:
 
 ## Screenshot Checklist
 
-Save each into `docs/screenshots/` with the exact filename below, then let me know and I'll wire them into this doc:
+Three remaining — save into `docs/screenshots/` (or attach directly on GitHub the same way as the others) with the filename below, then let me know and I'll wire them in:
 
 | Filename | What it should show |
 |---|---|
-| `00-postman-collection.png` | Postman: employee CRUD request/response |
-| `01-iam-user.png` | IAM user summary/permissions page |
-| `03-ec2-launch-review.png` | EC2 "Launch instance" review pane |
-| `04-java-maven-version.png` | Terminal: `java -version` + `mvn -version` |
-| `05-rds-summary.png` | RDS instance Summary panel |
-| `06-rds-security-group-rules.png` | RDS SG inbound rules (MySQL/Aurora sourced from EC2 SG) |
-| `07-app-startup-logs.png` | Terminal: Spring Boot startup logs, Tomcat on 8081 |
-| `07b-ec2-security-group-rules.png` | EC2 instance SG inbound rules (SSH, 8081 ×2) |
 | `08-target-group-healthy.png` | Target Group page showing 1 Healthy |
 | `09-alb-active.png` | Load Balancers list, `employee-service-alb` = Active |
 | `10-curl-via-alb.png` | Terminal: `curl` through the ALB DNS returning `OK` |
