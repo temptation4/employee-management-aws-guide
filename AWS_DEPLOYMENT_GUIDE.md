@@ -292,15 +292,15 @@ export AWS_S3_BUCKET="neelu-employee-profile-images-2026"
 
 1. `POST /api/employees/{id}/profile-picture` (multipart, key `file`) → `200 OK`, "Profile picture uploaded successfully."
 
-> 📸 **Screenshot needed:** `docs/screenshots/11-s3-upload-success.png` — Postman: the upload request/response.
+<img width="1738" height="1052" alt="image" src="https://github.com/user-attachments/assets/a65a5bd6-75b9-496c-8b90-faf1f3092bd1" />
+
 
 2. Confirmed the object landed in the bucket at `employees/{id}/{filename}`.
 
-> 📸 **Screenshot needed:** `docs/screenshots/12-s3-bucket-object.png` — S3 console showing the uploaded object inside `employees/{id}/`.
+<img width="1704" height="1082" alt="image" src="https://github.com/user-attachments/assets/bf11d4d6-522a-452b-b7a6-9c10db9a9d38" />
+
 
 3. `GET /api/employees/{id}/profile-picture` → returned a presigned URL; opening it in a browser tab loaded the image directly from S3.
-
-> 📸 **Screenshot needed:** `docs/screenshots/13-s3-presigned-url-image.png` — browser tab showing the image loaded from the presigned URL.
 
 4. `GET /api/employees/{id}` → `hasProfilePicture` now `true`.
 
