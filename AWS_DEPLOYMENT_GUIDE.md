@@ -2,32 +2,45 @@
 
 A step-by-step record of deploying `employee-service` (Spring Boot + MySQL + JWT) to AWS: IAM, EC2, RDS, and an Application Load Balancer, with the remaining steps still to come.
 
-This follows the phases in the [root README](README.md) and maps directly onto the 14-step checklist in [03-aws-steps/aws-steps.md](03-aws-steps/aws-steps.md).
+This follows the phases in the [root README](README.md) and maps directly onto the 14-step checklist in [docs/aws-steps.md](docs/aws-steps.md). See also [docs/architecture.md](docs/architecture.md) for the standalone architecture writeup.
 
 ---
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    Client["Client\n(Postman / Browser)"]
-    ALB["Application Load Balancer\nemployee-service-alb\nPort 80"]
-    TG["Target Group\nemployee-service-tg\nHTTP:8081, /health"]
-    EC2["EC2 Instance\nemployee-service-server\nUbuntu 24.04, t3.micro\nSpring Boot :8081"]
-    RDS[("RDS MySQL\ndatabase-1\nemployee_db schema")]
+flowchart TB
+    Client(["Client\nPostman / Browser"])
+    Internet(("Internet"))
 
-    Client -->|HTTP :80| ALB
-    ALB --> TG
-    TG --> EC2
-    EC2 -->|JDBC :3306\nemployee_svc user| RDS
-    EC2 -->|IAM role\nemployee-service-ec2-role| S3
+    subgraph AWS["AWS Account — eu-north-1"]
+        IGW["Internet Gateway"]
 
-    S3[("S3 Bucket\nneelu-employee-profile-images-2026")]
-    ASG["Auto Scaling Group\n(Step 13 — planned)"]
-    CW["CloudWatch Alarm\n(Step 14 — planned)"]
+        subgraph VPC["VPC: vpc-0023eaab02a24c1cc (172.31.0.0/16)"]
+            ALB["Application Load Balancer\nemployee-service-alb\nSG: employee-service-alb-sg\nHTTP :80"]
+            TG["Target Group: employee-service-tg\nHTTP :8081, health check /health"]
+
+            subgraph AZ1["AZ: eu-north-1a"]
+                EC2["EC2: employee-service-server\nUbuntu 24.04, t3.micro\nSG: launch-wizard-4\nSpring Boot :8081\nIAM Role: employee-service-ec2-role"]
+            end
+
+            subgraph AZ2["AZ: eu-north-1c"]
+                RDS[("RDS MySQL: database-1\nSG: launch-wizard-2\nemployee_db schema, employee_svc user")]
+                ASG["Auto Scaling Group\n(planned — Step 13)"]
+            end
+        end
+
+        S3[("S3: neelu-employee-profile-images-2026\n(outside VPC — IAM-governed, not SG-governed)")]
+        CW["CloudWatch Alarm\n(planned — Step 14)"]
+    end
+
+    Client --> Internet --> IGW --> ALB
+    ALB --> TG --> EC2
+    EC2 -->|JDBC :3306| RDS
+    EC2 -->|IAM role, no static keys| S3
     ALB -.->|planned| ASG
     ASG -.-> EC2
-    CW -.->|monitors| ASG
+    CW -.->|monitors CPU| ASG
 ```
 
 **Security groups involved:**
@@ -42,7 +55,7 @@ flowchart LR
 
 ## Application: Employee CRUD + JWT Auth
 
-Before touching AWS, the app itself was built at [`02-springboot-project/employee-service`](02-springboot-project/employee-service):
+Before touching AWS, the app itself was built at [`employee-service`](employee-service):
 
 - **Entities**: `Employee`, `User`, `Role` (enum)
 - **Layers**: Controller → Service (interface) → ServiceImpl → Repository, with request/response DTOs
@@ -206,7 +219,7 @@ FLUSH PRIVILEGES;
 
 ```bash
 git clone https://github.com/temptation4/employee-management-aws-guide.git
-cd employee-management-aws-guide/02-springboot-project/employee-service
+cd employee-management-aws-guide/employee-service
 
 export DB_URL="jdbc:mysql://<rds-endpoint>:3306/employee_db"
 export DB_USERNAME="employee_svc"
@@ -216,6 +229,8 @@ export JWT_SECRET="********"
 mvn clean package -DskipTests
 nohup java -jar target/employee-service-1.0.0.jar > employee-service.log 2>&1 &
 ```
+
+> The project was later flattened — `02-springboot-project/employee-service` became `employee-service` at the repo root, `01-architecture/` and `03-aws-steps/` became `docs/`. If you already have an older clone on EC2 from before this reorg, run `git pull` and `cd` into the new `employee-service` path.
 
 (Adding those `export` lines to `~/.bashrc` keeps them set across future SSH sessions, rather than re-exporting every time.)
 
