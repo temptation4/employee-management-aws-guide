@@ -62,10 +62,34 @@ Before touching AWS, the app itself was built at [`employee-service`](employee-s
 - **Security**: `JwtUtil`, `JwtFilter`, `SecurityConfig` — stateless JWT auth, BCrypt password hashing
 - **Endpoints**: `/api/auth/register`, `/api/auth/login`, `/api/employees/**` (CRUD, JWT-protected), `/api/users/me`, `/api/users` (ADMIN only), `/health` (public, for the ALB)
 
-Tested locally end-to-end with Postman — creating an employee via `POST /api/employees` and reading it back via `GET /api/employees` both returning `200 OK` with the expected JSON.
+Tested locally end-to-end with Postman — creating an employee via `POST /api/employees` and reading it back via `GET /api/employees` both returning `200 OK` with the expected JSON:
 
-<img width="1756" height="1354" alt="image" src="https://github.com/user-attachments/assets/aba68d9e-8407-4376-bf72-82ee28bf18b8" />
+```
+POST http://localhost:8089/api/employees
+Content-Type: application/json
 
+{
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "department": "Engineering",
+  "designation": "Backend Developer"
+}
+```
+
+```
+GET http://localhost:8089/api/employees
+→ 200 OK
+
+[
+  {
+    "id": 1,
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "department": "Engineering",
+    "designation": "Backend Developer"
+  }
+]
+```
 
 ---
 
@@ -137,9 +161,12 @@ ssh -i ~/.ssh/aws-keys/springboot-key.pem ubuntu@<PUBLIC_IP>
 
 Launched as a *second*, dedicated instance rather than reusing an EC2 already running an unrelated project — keeps the two isolated (no port collisions, a crash in one doesn't affect the other).
 
-
-<img width="1848" height="890" alt="image" src="https://github.com/user-attachments/assets/e4a71f9a-a016-4b3b-a36e-c8cbbef362c2" />
-
+```
+$ ssh -i springboot-key.pem ubuntu@56.228.11.215
+Welcome to Ubuntu 24.04.4 LTS (GNU/Linux 6.17.0-1017-aws x86_64)
+...
+ubuntu@ip-172-31-22-24:~$
+```
 
 
 ### ✅ Step 4 — Install Java
@@ -159,7 +186,16 @@ sudo apt install -y maven
 mvn -version
 ```
 
-<img width="1816" height="494" alt="image" src="https://github.com/user-attachments/assets/2f69f9bf-dc18-4669-8e4c-7d494634c498" />
+```
+openjdk version "21.0.11" 2026-04-21
+OpenJDK Runtime Environment (build 21.0.11+10-1-24.04.2-Ubuntu)
+OpenJDK 64-Bit Server VM (build 21.0.11+10-1-24.04.2-Ubuntu, mixed mode, sharing)
+
+Apache Maven 3.8.7
+Maven home: /usr/share/maven
+Java version: 21.0.11, vendor: Ubuntu, runtime: /usr/lib/jvm/java-21-openjdk-amd64
+OS name: "linux", version: "6.17.0-1017-aws", arch: "amd64", family: "unix"
+```
 
 ### ✅ Step 5 — Create RDS (instead of local MySQL)
 
@@ -234,7 +270,20 @@ nohup java -jar target/employee-service-1.0.0.jar > employee-service.log 2>&1 &
 
 (Adding those `export` lines to `~/.bashrc` keeps them set across future SSH sessions, rather than re-exporting every time.)
 
-<img width="2882" height="988" alt="image" src="https://github.com/user-attachments/assets/9c73a488-aee5-4d8f-86c5-9d815e2e1fdd" />
+```
+:: Spring Boot ::                (v3.3.0)
+
+... Starting EmployeeServiceApplication v1.0.0 using Java 21.0.11
+... Tomcat initialized with port 8081 (http)
+... HikariPool-1 - Starting...
+... HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@71139e77
+... HikariPool-1 - Start completed.
+Hibernate: create table employees (...)
+Hibernate: create table users (...)
+... Will secure any request with [..., JwtFilter, ...]
+... Tomcat started on port 8081 (http) with context path '/'
+... Started EmployeeServiceApplication in 9.683 seconds
+```
 
 
 ### ✅ Step 7 — Configure Security Group
@@ -248,8 +297,6 @@ nohup java -jar target/employee-service-1.0.0.jar > employee-service.log 2>&1 &
 | Custom TCP | 8081 | `employee-service-alb-sg` | Lets the ALB's health checks and forwarded traffic through (added in Step 12) |
 
 To add a rule: open the SG → **Edit inbound rules** → **Add rule** (don't remove existing ones) → set Type/Port/Source → **Save rules**.
-
-<img width="2940" height="1232" alt="image" src="https://github.com/user-attachments/assets/dc2c175a-d55e-4d22-bbdd-90c257070285" />
 
 
 ### ✅ Step 8 — Test Application
@@ -281,7 +328,7 @@ Used an IAM Role rather than static access keys, since roles auto-rotate credent
 4. Named it `employee-service-ec2-role`.
 5. Attached it to the running instance: **EC2** → select `employee-service-server` → **Actions** → **Security** → **Modify IAM role** → select `employee-service-ec2-role`.
 
-<img width="2940" height="1130" alt="image" src="https://github.com/user-attachments/assets/b4c40df2-6af8-4b9c-9896-c8cf83f152e3" />
+Confirmed on the instance's **Security** tab: `IAM role: employee-service-ec2-role`.
 
 
 ### ✅ Step 11 — Upload Files to S3
@@ -305,14 +352,18 @@ export AWS_S3_BUCKET="neelu-employee-profile-images-2026"
 
 **Verified end-to-end via Postman:**
 
-1. `POST /api/employees/{id}/profile-picture` (multipart, key `file`) → `200 OK`, "Profile picture uploaded successfully."
+1. `POST /api/employees/{id}/profile-picture` (multipart form-data, key `file`):
 
-<img width="1738" height="1052" alt="image" src="https://github.com/user-attachments/assets/a65a5bd6-75b9-496c-8b90-faf1f3092bd1" />
+```
+POST http://localhost:8089/api/employees/1/profile-picture
+Authorization: Bearer {{token}}
+Body: form-data → file (type: File) → [selected image]
 
+→ 200 OK
+Profile picture uploaded successfully.
+```
 
-2. Confirmed the object landed in the bucket at `employees/{id}/{filename}`.
-
-<img width="1704" height="1082" alt="image" src="https://github.com/user-attachments/assets/bf11d4d6-522a-452b-b7a6-9c10db9a9d38" />
+2. Confirmed in the S3 console: the object landed in the bucket at `employees/1/<filename>`.
 
 
 3. `GET /api/employees/{id}/profile-picture` → returned a presigned URL; opening it in a browser tab loaded the image directly from S3.
