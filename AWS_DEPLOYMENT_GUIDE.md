@@ -608,8 +608,8 @@ flowchart TB
 1. ✅ Add a `Dockerfile` to `employee-service`, verify it runs locally
 2. ✅ Create an ECR repository, push an image manually first (prove the container works before automating anything)
 3. ✅ Stand up Jenkins — reused an existing local Jenkins install (Homebrew `jenkins-lts`, running on `127.0.0.1:8080`) already set up from a prior unrelated project, rather than provisioning a new EC2 instance for it. No new AWS cost.
-4. ⏳ Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
-5. Stand up an EKS cluster (`eksctl` is the fastest path), write Kubernetes Deployment/Service manifests, wrap them in a Helm chart
+4. ✅ Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
+5. ⏳ Stand up an EKS cluster (`eksctl` is the fastest path), write Kubernetes Deployment/Service manifests, wrap them in a Helm chart
 6. Install the AWS Load Balancer Controller in the cluster, wire the Helm chart's Service to provision an ALB via Ingress
 7. Point Jenkins's last pipeline stage at `helm upgrade`
 
@@ -657,6 +657,69 @@ docker push 620969610221.dkr.ecr.eu-north-1.amazonaws.com/employee-service:lates
 Pushed successfully — `620969610221.dkr.ecr.eu-north-1.amazonaws.com/employee-service:latest`, ~186MB. `aws ecr describe-images` confirms it as `ACTIVE`. The manifest is a multi-arch image index (separate `linux/amd64`/`linux/arm64` digests under one `latest` tag) — a side effect of building with Docker Desktop's default `buildx` on Apple Silicon; EKS worker nodes will pull whichever architecture they run on automatically.
 
 > Cost note: ECR only bills for what's stored — no fixed hourly charge like EKS. Delete the repository (or just the images in it) once you're done experimenting and billing stops immediately; a single ~186MB image is within the AWS free tier's 500MB-month private-repo allowance for new accounts anyway.
+
+**Steps 3 & 4, verified:** Jenkins job `Employee-Service-CI-CD`, configured as **Pipeline script from SCM** pointing at this repo's `main` branch, script path `employee-service/Jenkinsfile`.
+
+```groovy
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION     = 'eu-north-1'
+        AWS_ACCOUNT_ID = '620969610221'
+        ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        ECR_REPO       = "${ECR_REGISTRY}/employee-service"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                }
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                dir('employee-service') {
+                    sh 'mvn clean package'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                dir('employee-service') {
+                    sh "docker build -t ${ECR_REPO}:${IMAGE_TAG} -t ${ECR_REPO}:latest ."
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                sh """
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker push ${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REPO}:latest
+                """
+            }
+        }
+    }
+
+    post {
+        always {
+            sh "docker rmi ${ECR_REPO}:${IMAGE_TAG} ${ECR_REPO}:latest || true"
+        }
+    }
+}
+```
+
+`Build & Test` and `Docker Build` are wrapped in `dir('employee-service')` — `checkout scm` pulls the whole monorepo into the Jenkins workspace root, but `pom.xml` and `Dockerfile` live under `employee-service/`, so the steps that need them have to `cd` in first. `IMAGE_TAG` is derived from `git rev-parse --short HEAD` rather than relying on `env.GIT_COMMIT`, which isn't always populated depending on the checkout method.
+
+Build #2 result: `Finished: SUCCESS`. Checkout → `mvn clean package` (`BUILD SUCCESS`, 0 tests — none exist yet) → Docker build → pushed `employee-service:584d9bc` and `employee-service:latest` to ECR (digest `sha256:7979fb3...`) → post-build cleanup removed the local images to avoid accumulating disk space on repeated runs.
 
 ---
 
