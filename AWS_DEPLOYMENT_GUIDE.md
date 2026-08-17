@@ -607,8 +607,8 @@ flowchart TB
 **Rough build order, when this gets picked up:**
 1. ✅ Add a `Dockerfile` to `employee-service`, verify it runs locally
 2. ✅ Create an ECR repository, push an image manually first (prove the container works before automating anything)
-3. ⏳ Stand up Jenkins (either on a small EC2 instance, or AWS-managed alternatives worth comparing: CodePipeline/CodeBuild, or GitHub Actions instead of Jenkins entirely — simpler to operate, no server to maintain)
-4. Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
+3. ✅ Stand up Jenkins — reused an existing local Jenkins install (Homebrew `jenkins-lts`, running on `127.0.0.1:8080`) already set up from a prior unrelated project, rather than provisioning a new EC2 instance for it. No new AWS cost.
+4. ⏳ Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
 5. Stand up an EKS cluster (`eksctl` is the fastest path), write Kubernetes Deployment/Service manifests, wrap them in a Helm chart
 6. Install the AWS Load Balancer Controller in the cluster, wire the Helm chart's Service to provision an ALB via Ingress
 7. Point Jenkins's last pipeline stage at `helm upgrade`
