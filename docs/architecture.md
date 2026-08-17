@@ -67,6 +67,7 @@ Unlike EC2/RDS/ALB, S3 isn't a VPC-attached resource — access to it is control
 
 - **Auto Scaling Group** (Step 13) — replace the single manually-managed EC2 instance with a Launch Template + ASG behind the existing target group. Once built, `employee-service-high-cpu` (below) should get a scaling-policy action attached instead of running as a standalone alert.
 - **SQS Notification Service** (README Phase 7) and **Redis Cache** (README Phase 8) — not started.
+- **Longer-term target: CI/CD to EKS** — Jenkins → Docker → ECR → Helm → EKS, replacing the manually-deployed EC2 instance entirely. See [AWS_DEPLOYMENT_GUIDE.md § Target Architecture](../AWS_DEPLOYMENT_GUIDE.md#target-architecture--cicd-to-eks-planned-not-started) for the full diagram and build order.
 
 ## Monitoring
 

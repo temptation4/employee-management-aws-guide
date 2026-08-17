@@ -503,12 +503,79 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
 
 ---
 
+## Target Architecture — CI/CD to EKS (planned, not started)
+
+Everything above is a manually-managed single EC2 instance. The longer-term target replaces that with a proper CI/CD pipeline deploying containers to Kubernetes:
+
+```mermaid
+flowchart TB
+    Dev["Developer"]
+    Repo["GitHub repo"]
+
+    subgraph CI["Jenkins CI/CD"]
+        Checkout["Checkout"]
+        Build["Maven build/test"]
+        Tests["Tests"]
+        DockerBuild["Docker build"]
+    end
+
+    ECR[("Amazon ECR\nemployee-service:&lt;commit-sha&gt;")]
+    Helm["Helm upgrade"]
+
+    subgraph EKS["EKS cluster"]
+        Deployment["Deployment"]
+        Pods["Pods"]
+    end
+
+    ALB["AWS Load Balancer"]
+    Users["Users"]
+
+    Dev --> Repo -->|webhook| Checkout
+    Checkout --> Build --> Tests --> DockerBuild
+    DockerBuild --> ECR
+    ECR -->|image: employee-service:&lt;commit-sha&gt;| Helm
+    Helm --> Deployment --> Pods
+    Pods --> ALB --> Users
+
+    classDef gray fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A;
+    classDef blue fill:#E6F1FB,stroke:#185FA5,color:#042C53;
+    classDef teal fill:#E1F5EE,stroke:#0F6E56,color:#04342C;
+
+    class Dev,Repo,ALB,Users gray
+    class Checkout,Build,Tests,DockerBuild,ECR,Helm blue
+    class Deployment,Pods teal
+```
+
+**Why this replaces the current setup:**
+
+| Today (EC2) | Target (EKS) |
+|---|---|
+| `git pull` + `mvn package` + `nohup java -jar` by hand on the instance | Jenkins builds, tests, and containerizes on every push — no manual SSH deploy step |
+| JAR file distributed via git | Immutable, versioned Docker images in ECR, tagged by commit SHA |
+| Single EC2 instance, manually restarted on failure | Kubernetes restarts crashed pods automatically; rolling updates via `helm upgrade` with zero downtime |
+| Planned ASG (Step 13) scales EC2 instances | Kubernetes Horizontal Pod Autoscaler scales pods — makes Step 13 as originally scoped unnecessary |
+| ALB points at a target group of EC2 instances | AWS Load Balancer Controller provisions/manages the ALB directly from Kubernetes Ingress/Service objects |
+
+**Rough build order, when this gets picked up:**
+1. Add a `Dockerfile` to `employee-service`, verify it runs locally
+2. Create an ECR repository, push an image manually first (prove the container works before automating anything)
+3. Stand up Jenkins (either on a small EC2 instance, or AWS-managed alternatives worth comparing: CodePipeline/CodeBuild, or GitHub Actions instead of Jenkins entirely — simpler to operate, no server to maintain)
+4. Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
+5. Stand up an EKS cluster (`eksctl` is the fastest path), write Kubernetes Deployment/Service manifests, wrap them in a Helm chart
+6. Install the AWS Load Balancer Controller in the cluster, wire the Helm chart's Service to provision an ALB via Ingress
+7. Point Jenkins's last pipeline stage at `helm upgrade`
+
+Not started — RDS and S3 stay as-is either way (EKS pods would connect to the same RDS instance and use the same S3 bucket via a Kubernetes-native IAM mechanism, IRSA, instead of an EC2 instance role).
+
+---
+
 ## What's Next
 
 In order:
 
-1. **Step 13** — Auto Scaling Group (then wire `employee-service-high-cpu` to its scaling policy)
+1. **Step 13** — Auto Scaling Group (then wire `employee-service-high-cpu` to its scaling policy) — worth reconsidering given the EKS target above makes EC2-level ASG a stepping stone rather than the end state
 2. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
+3. Target architecture (CI/CD → EKS) — longer-term, see above
 
 ---
 
