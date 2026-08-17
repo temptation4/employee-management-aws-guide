@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION     = 'eu-north-1'
+        AWS_ACCOUNT_ID = '620969610221'
+        ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        ECR_REPO       = "${ECR_REGISTRY}/employee-service"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+
+                script {
+                    env.IMAGE_TAG = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+                }
+
+                echo "Building image: ${ECR_REPO}:${IMAGE_TAG}"
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                dir('employee-service') {
+                    sh 'mvn clean package'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                dir('employee-service') {
+                    sh """
+                        docker build \
+                            -t ${ECR_REPO}:${IMAGE_TAG} \
+                            -t ${ECR_REPO}:latest \
+                            .
+                    """
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                sh """
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login \
+                        --username AWS \
+                        --password-stdin ${ECR_REGISTRY}
+
+                    docker push ${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REPO}:latest
+                """
+            }
+        }
+    }
+
+    post {
+        always {
+            sh """
+                docker rmi \
+                    ${ECR_REPO}:${IMAGE_TAG} \
+                    ${ECR_REPO}:latest \
+                    || true
+            """
+        }
+    }
+}
