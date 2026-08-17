@@ -503,9 +503,57 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
 
 ---
 
-## Target Architecture — CI/CD to EKS (planned, not started)
+## Target Architecture — CI/CD to EKS (planned, in progress)
 
 Everything above is a manually-managed single EC2 instance. The longer-term target replaces that with a proper CI/CD pipeline deploying containers to Kubernetes:
+
+**Full target stack:**
+
+| Layer | Technology |
+|---|---|
+| Source | GitHub |
+| CI/CD | Jenkins |
+| Build | Maven |
+| Java | Java 21 |
+| Container | Docker |
+| Registry | Amazon ECR |
+| Runtime | Amazon EKS |
+| Packaging | Helm |
+| Load Balancer | AWS ALB |
+| Infrastructure | Terraform |
+| Monitoring | CloudWatch + Prometheus/Grafana |
+| Secrets | AWS Secrets Manager |
+| IAM | IAM Roles / EKS Pod Identity |
+| Logging | CloudWatch Logs |
+
+**Target repo layout** (`employee-service/`):
+
+```
+employee-service/
+├── src/
+├── pom.xml
+├── Dockerfile
+├── Jenkinsfile
+├── helm/
+│   └── employee-service/
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           ├── ingress.yaml
+│           ├── configmap.yaml
+│           └── hpa.yaml
+└── terraform/
+    ├── main.tf
+    ├── variables.tf
+    ├── outputs.tf
+    ├── vpc.tf
+    ├── eks.tf
+    └── ecr.tf
+```
+
+Separation of concerns: Terraform provisions infrastructure (VPC, EKS, ECR), Helm deploys the application onto that infrastructure, Jenkins orchestrates the pipeline connecting the two.
 
 ```mermaid
 flowchart TB
@@ -557,15 +605,42 @@ flowchart TB
 | ALB points at a target group of EC2 instances | AWS Load Balancer Controller provisions/manages the ALB directly from Kubernetes Ingress/Service objects |
 
 **Rough build order, when this gets picked up:**
-1. Add a `Dockerfile` to `employee-service`, verify it runs locally
-2. Create an ECR repository, push an image manually first (prove the container works before automating anything)
+1. ✅ Add a `Dockerfile` to `employee-service`, verify it runs locally
+2. ⏳ Create an ECR repository, push an image manually first (prove the container works before automating anything)
 3. Stand up Jenkins (either on a small EC2 instance, or AWS-managed alternatives worth comparing: CodePipeline/CodeBuild, or GitHub Actions instead of Jenkins entirely — simpler to operate, no server to maintain)
 4. Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
 5. Stand up an EKS cluster (`eksctl` is the fastest path), write Kubernetes Deployment/Service manifests, wrap them in a Helm chart
 6. Install the AWS Load Balancer Controller in the cluster, wire the Helm chart's Service to provision an ALB via Ingress
 7. Point Jenkins's last pipeline stage at `helm upgrade`
 
-Not started — RDS and S3 stay as-is either way (EKS pods would connect to the same RDS instance and use the same S3 bucket via a Kubernetes-native IAM mechanism, IRSA, instead of an EC2 instance role).
+Steps 3-7 not started — RDS and S3 stay as-is either way (EKS pods would connect to the same RDS instance and use the same S3 bucket via a Kubernetes-native IAM mechanism, IRSA, instead of an EC2 instance role).
+
+**Step 1, verified:**
+
+```dockerfile
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY target/employee-service-1.0.0.jar app.jar
+EXPOSE 8081
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+```bash
+mvn clean package -DskipTests
+docker build -t employee-service:local .
+docker run -d --name employee-service-test -p 8091:8081 \
+  -e DB_URL="jdbc:mysql://host.docker.internal:3306/employee_db" \
+  -e DB_USERNAME="root" \
+  -e DB_PASSWORD="password" \
+  employee-service:local
+
+curl http://localhost:8091/health
+# → OK
+```
+
+`host.docker.internal` is Docker Desktop's special DNS name for reaching the host machine from inside a container — `localhost` inside the container refers to the container itself, not your Mac, so a local MySQL install needs this to be reachable.
+
+In the process, found and fixed a drift: `application.properties` had `server.port=8089` left over from earlier local Postman testing, while the Dockerfile (and every production reference — EC2, the ALB target group) uses `8081`. Reverted to `8081` to match everywhere.
 
 ---
 
