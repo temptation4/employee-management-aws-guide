@@ -15,4 +15,4 @@ Quick-reference checklist. For full click-by-click instructions, commands, and s
 11. **Upload Files to S3** — profile-picture upload/download/delete wired into `EmployeeController`, verified end-to-end via Postman ✅
 12. **Create ALB** — Target Group with `/health` check, ALB across 2 AZs, dedicated `employee-service-alb-sg` ✅
 13. **Create Auto Scaling Group** — not yet done ⏳
-14. **Configure CloudWatch Alarm** — not yet done ⏳
+14. **Configure CloudWatch Alarm** — CloudWatch Agent installed (custom namespace `EmployeeService/EC2`), `employee-service-high-cpu` alarm on `cpu_usage_user >= 80%`, built ahead of Step 13 so it currently watches the EC2 instance directly (no scaling action attached yet) ✅

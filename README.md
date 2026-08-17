@@ -1,6 +1,6 @@
 # Employee Management System — AWS Learning Project
 
-A hands-on AWS learning project: deploying a Spring Boot employee management API through IAM, EC2, RDS, S3, and an Application Load Balancer, with Auto Scaling and CloudWatch still to come.
+A hands-on AWS learning project: deploying a Spring Boot employee management API through IAM, EC2, RDS, S3, an Application Load Balancer, and CloudWatch monitoring, with Auto Scaling still to come.
 
 ## Where to look
 
@@ -22,4 +22,4 @@ A hands-on AWS learning project: deploying a Spring Boot employee management API
 | 6 | S3 File Upload | ✅ |
 | 7 | SQS Notification Service | ⏳ not started |
 | 8 | Redis Cache | ⏳ not started |
-| 9 | Auto Scaling + CloudWatch | ⏳ not started |
+| 9 | Auto Scaling + CloudWatch | 🟡 CloudWatch done, Auto Scaling not started |

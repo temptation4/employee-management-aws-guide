@@ -31,7 +31,7 @@ flowchart TB
         end
 
         S3[("S3: neelu-employee-profile-images-2026\n(outside VPC — IAM-governed, not SG-governed)")]
-        CW["CloudWatch Alarm\n(planned — Step 14)"]
+        CW["CloudWatch Alarm: employee-service-high-cpu\nCWAgent · EmployeeService/EC2\ncpu_usage_user >= 80%"]
     end
 
     Client --> Internet --> IGW --> ALB
@@ -40,15 +40,17 @@ flowchart TB
     EC2 -->|IAM role, no static keys| S3
     ALB -.->|planned| ASG
     ASG -.-> EC2
-    CW -.->|monitors CPU| ASG
+    CW -->|monitors, no action yet| EC2
 
     classDef gray fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A;
     classDef blue fill:#E6F1FB,stroke:#185FA5,color:#042C53;
     classDef teal fill:#E1F5EE,stroke:#0F6E56,color:#04342C;
+    classDef amber fill:#FAEEDA,stroke:#854F0B,color:#412402;
 
-    class Client,Internet,IGW,ASG,CW gray
+    class Client,Internet,IGW,ASG gray
     class ALB,TG,EC2 blue
     class RDS,S3 teal
+    class CW amber
 ```
 
 **Security groups involved:**
@@ -416,9 +418,18 @@ curl http://<ALB_DNS_NAME>/health
 
 Traffic now flows: **Client → ALB (port 80) → Target Group → EC2 (port 8081) → Spring Boot → RDS**.
 
-> 📸 **Screenshot needed:** `docs/screenshots/10-curl-via-alb.png` — terminal showing the `curl` call against the ALB DNS name returning `OK`.
+```
+$ curl http://employee-service-alb-353208618.eu-north-1.elb.amazonaws.com/health
+OK
+$ curl http://56.228.11.215:8081/health
+OK
+```
+
+Both the ALB path and the direct EC2 path respond — confirms the target group is routing correctly.
 
 ### ⏳ Step 13 — Create Auto Scaling Group
+
+`employee-service-tg` (created in Step 12) is reused as-is here — the ASG attaches new instances to this same target group rather than needing a new one.
 
 *Not yet done.* Planned approach:
 
@@ -427,14 +438,68 @@ Traffic now flows: **Client → ALB (port 80) → Target Group → EC2 (port 808
 3. Attach it to the existing `employee-service-tg` target group, so the ALB automatically picks up new instances.
 4. Set desired/min/max capacity (e.g. min 1, desired 1, max 3 for a learning project).
 
-### ⏳ Step 14 — Configure CloudWatch Alarm
+### ✅ Step 14 — Configure CloudWatch Alarm
 
-*Not yet done.* Planned once the ASG exists:
+Built ahead of Step 13 — this alarm currently watches the single `employee-service-server` instance directly rather than an ASG, since the ASG doesn't exist yet. It has no scaling action attached (pure observability for now); once Step 13 is done, this same alarm can be pointed at an ASG scaling policy instead.
+
+Also went a level deeper than plain EC2 monitoring: the default `CPUUtilization` metric (namespace `AWS/EC2`) is hypervisor-level and doesn't need anything installed, but it's coarse. Installing the **CloudWatch Agent** gives OS-level metrics (per-process CPU breakdown, actual memory/disk usage) that the hypervisor can't see.
+
+**1. Install the CloudWatch Agent on the instance:**
+
+```bash
+wget https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+sudo dpkg -i -E ./amazon-cloudwatch-agent.deb
+```
+
+**2. IAM permissions:** the agent needs to push metrics to CloudWatch, so `employee-service-ec2-role` (from Step 10) also needs the `CloudWatchAgentServerPolicy` managed policy attached, alongside the existing `AmazonS3FullAccess` — **IAM** → **Roles** → `employee-service-ec2-role` → **Add permissions** → **Attach policies** → `CloudWatchAgentServerPolicy`.
+
+**3. Configure the agent** — `/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/file_amazon-cloudwatch-agent.json`:
+
+```json
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "run_as_user": "cwagent"
+  },
+  "metrics": {
+    "namespace": "EmployeeService/EC2",
+    "metrics_collected": {
+      "cpu": {
+        "measurement": ["cpu_usage_idle", "cpu_usage_user", "cpu_usage_system"],
+        "metrics_collection_interval": 60,
+        "totalcpu": true
+      },
+      "mem": {
+        "measurement": ["mem_used_percent"],
+        "metrics_collection_interval": 60
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "metrics_collection_interval": 60,
+        "resources": ["/"]
+      }
+    }
+  }
+}
+```
+
+**4. Start the agent with that config:**
+
+```bash
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 -s \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/file_amazon-cloudwatch-agent.json
+```
+
+**5. Create the alarm:**
 
 1. **CloudWatch** → **Alarms** → **Create alarm**.
-2. Metric: `CPUUtilization` on the Auto Scaling Group.
-3. Threshold: e.g. scale out above 70% for 5 minutes.
-4. Action: trigger the ASG's scaling policy.
+2. Select metric → namespace `EmployeeService/EC2` → `cpu_usage_user`.
+3. Condition: `cpu_usage_user >= 80` for 1 datapoint within 5 minutes.
+4. Name: `employee-service-high-cpu`.
+5. No action configured yet — currently alerts to `OK`/`In alarm` status only, visible on the CloudWatch Alarms dashboard.
+
+> 📸 **Screenshot needed:** `docs/screenshots/14-cloudwatch-alarm.png` — the `employee-service-high-cpu` alarm detail page showing the `cpu_usage_user` graph and `OK` status.
 
 ---
 
@@ -442,9 +507,8 @@ Traffic now flows: **Client → ALB (port 80) → Target Group → EC2 (port 808
 
 In order:
 
-1. **Step 13** — Auto Scaling Group
-2. **Step 14** — CloudWatch alarm
-3. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
+1. **Step 13** — Auto Scaling Group (then wire `employee-service-high-cpu` to its scaling policy)
+2. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
 
 ---
 
@@ -456,7 +520,7 @@ Six remaining — save into `docs/screenshots/` (or attach directly on GitHub th
 |---|---|
 | `08-target-group-healthy.png` | Target Group page showing 1 Healthy |
 | `09-alb-active.png` | Load Balancers list, `employee-service-alb` = Active |
-| `10-curl-via-alb.png` | Terminal: `curl` through the ALB DNS returning `OK` |
 | `11-s3-upload-success.png` | Postman: profile-picture upload request/response (`200 OK`) |
 | `12-s3-bucket-object.png` | S3 console: uploaded object inside `employees/{id}/` |
 | `13-s3-presigned-url-image.png` | Browser tab showing the image loaded from the presigned URL |
+| `14-cloudwatch-alarm.png` | `employee-service-high-cpu` alarm graph and `OK` status |
