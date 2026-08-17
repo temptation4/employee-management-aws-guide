@@ -606,8 +606,8 @@ flowchart TB
 
 **Rough build order, when this gets picked up:**
 1. ✅ Add a `Dockerfile` to `employee-service`, verify it runs locally
-2. ⏳ Create an ECR repository, push an image manually first (prove the container works before automating anything)
-3. Stand up Jenkins (either on a small EC2 instance, or AWS-managed alternatives worth comparing: CodePipeline/CodeBuild, or GitHub Actions instead of Jenkins entirely — simpler to operate, no server to maintain)
+2. ✅ Create an ECR repository, push an image manually first (prove the container works before automating anything)
+3. ⏳ Stand up Jenkins (either on a small EC2 instance, or AWS-managed alternatives worth comparing: CodePipeline/CodeBuild, or GitHub Actions instead of Jenkins entirely — simpler to operate, no server to maintain)
 4. Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
 5. Stand up an EKS cluster (`eksctl` is the fastest path), write Kubernetes Deployment/Service manifests, wrap them in a Helm chart
 6. Install the AWS Load Balancer Controller in the cluster, wire the Helm chart's Service to provision an ALB via Ingress
@@ -641,6 +641,22 @@ curl http://localhost:8091/health
 `host.docker.internal` is Docker Desktop's special DNS name for reaching the host machine from inside a container — `localhost` inside the container refers to the container itself, not your Mac, so a local MySQL install needs this to be reachable.
 
 In the process, found and fixed a drift: `application.properties` had `server.port=8089` left over from earlier local Postman testing, while the Dockerfile (and every production reference — EC2, the ALB target group) uses `8081`. Reverted to `8081` to match everywhere.
+
+**Step 2, verified:**
+
+```bash
+aws ecr create-repository --repository-name employee-service --region eu-north-1
+
+aws ecr get-login-password --region eu-north-1 | \
+  docker login --username AWS --password-stdin 620969610221.dkr.ecr.eu-north-1.amazonaws.com
+
+docker tag employee-service:local 620969610221.dkr.ecr.eu-north-1.amazonaws.com/employee-service:latest
+docker push 620969610221.dkr.ecr.eu-north-1.amazonaws.com/employee-service:latest
+```
+
+Pushed successfully — `620969610221.dkr.ecr.eu-north-1.amazonaws.com/employee-service:latest`, ~186MB. `aws ecr describe-images` confirms it as `ACTIVE`. The manifest is a multi-arch image index (separate `linux/amd64`/`linux/arm64` digests under one `latest` tag) — a side effect of building with Docker Desktop's default `buildx` on Apple Silicon; EKS worker nodes will pull whichever architecture they run on automatically.
+
+> Cost note: ECR only bills for what's stored — no fixed hourly charge like EKS. Delete the repository (or just the images in it) once you're done experimenting and billing stops immediately; a single ~186MB image is within the AWS free tier's 500MB-month private-repo allowance for new accounts anyway.
 
 ---
 
