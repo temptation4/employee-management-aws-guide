@@ -2,6 +2,8 @@
 
 A hands-on AWS learning project: deploying a Spring Boot employee management API through IAM, EC2, RDS, S3, an Application Load Balancer, and CloudWatch monitoring, with Auto Scaling still to come.
 
+> ⚠️ **Current status**: the production EC2 instance was accidentally terminated during an EKS experiment — see the incident write-up under [§ Target Architecture](AWS_DEPLOYMENT_GUIDE.md#target-architecture--cicd-to-eks-planned-in-progress) ("Step 5, attempted and rolled back"). RDS and S3 are unaffected — no data lost. Recovery steps are in the [Production Deployment Runbook](AWS_DEPLOYMENT_GUIDE.md#production-deployment-runbook).
+
 ## Where to look
 
 - **[AWS_DEPLOYMENT_GUIDE.md](AWS_DEPLOYMENT_GUIDE.md)** — the full build log: every AWS step in order, with commands, screenshots, and the reasoning behind each decision. Start here.
@@ -16,10 +18,11 @@ A hands-on AWS learning project: deploying a Spring Boot employee management API
 |---|---|---|
 | 1 | Spring Boot + MySQL, Employee CRUD | ✅ |
 | 2 | Spring Security + JWT | ✅ |
-| 3 | Deploy to EC2 | ✅ |
-| 4 | Application Load Balancer | ✅ |
-| 5 | RDS | ✅ |
-| 6 | S3 File Upload | ✅ |
+| 3 | Deploy to EC2 | ⚠️ instance terminated, needs relaunch — see [runbook](AWS_DEPLOYMENT_GUIDE.md#production-deployment-runbook) |
+| 4 | Application Load Balancer | ✅ ALB up, target group needs re-registration after recovery |
+| 5 | RDS | ✅ unaffected by the EC2 incident |
+| 6 | S3 File Upload | ✅ unaffected by the EC2 incident |
 | 7 | SQS Notification Service | ⏳ not started |
 | 8 | Redis Cache | ⏳ not started |
 | 9 | Auto Scaling + CloudWatch | 🟡 CloudWatch done, Auto Scaling not started |
+| — | CI/CD → EKS (target architecture) | 🔄 Dockerfile/ECR/Jenkins pipeline done and reusable; EKS attempt rolled back (Free Tier instance-type limit) |

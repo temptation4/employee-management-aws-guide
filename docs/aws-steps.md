@@ -2,9 +2,11 @@
 
 Quick-reference checklist. For full click-by-click instructions, commands, and screenshots, see [AWS_DEPLOYMENT_GUIDE.md](../AWS_DEPLOYMENT_GUIDE.md).
 
+> ⚠️ `employee-service-server` was accidentally terminated during an EKS experiment (see AWS_DEPLOYMENT_GUIDE.md's Target Architecture section) — Step 3 needs to be repeated. RDS/S3 unaffected. See the [Production Deployment Runbook](../AWS_DEPLOYMENT_GUIDE.md#production-deployment-runbook) for recovery.
+
 1. **Create IAM User** — `employee-service-deployer`, programmatic access only, `AmazonS3FullAccess` + `AmazonEC2FullAccess` ✅
 2. **Create Key Pair** — `springboot-key.pem`, RSA, reused across instances ✅
-3. **Launch EC2** — Ubuntu 24.04, `t3.micro`, `employee-service-server` ✅
+3. **Launch EC2** — Ubuntu 24.04, `t3.micro`, `employee-service-server` ⚠️ terminated, needs relaunch
 4. **Install Java (and Maven)** — OpenJDK 21 + Maven, needed to build the JAR on-instance ✅
 5. **Create RDS** (chosen over local MySQL) — MySQL 8.4, `db.t4g.micro`, not publicly accessible, isolated schema + user ✅
 6. **Deploy Spring Boot JAR** — clone from GitHub, build with Maven, run with `nohup` so it survives SSH disconnects ✅

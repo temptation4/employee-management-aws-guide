@@ -178,6 +178,7 @@ Welcome to Ubuntu 24.04.4 LTS (GNU/Linux 6.17.0-1017-aws x86_64)
 ubuntu@ip-172-31-22-24:~$
 ```
 
+> ⚠️ **Update**: this original instance (`i-0af09d080ac168773`) was later terminated by accident during an unrelated EKS cleanup session (see the Step 5 write-up under [Target Architecture](#target-architecture--cicd-to-eks-planned-in-progress) for the full story — confirmed via CloudTrail as a manual `root` action, not caused by any command in this guide). RDS and S3 were unaffected. See [Production Deployment Runbook](#production-deployment-runbook) for the relaunch + redeploy steps used to recover.
 
 ### ✅ Step 4 — Install Java
 
@@ -503,6 +504,41 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
 
 ---
 
+## Production Deployment Runbook
+
+How deployments to the current (EC2-based) production setup actually work — both the routine case and full recovery from an instance loss like the one documented in Step 5 above. Once the [Target Architecture](#target-architecture--cicd-to-eks-planned-in-progress) is live, this whole runbook collapses to "push to `main`, Jenkins does the rest" — this is the manual version until then.
+
+### Routine redeploy (instance already running, new code to ship)
+
+1. Push code to `main` on GitHub.
+2. SSH into `employee-service-server`:
+   ```bash
+   ssh -i springboot-key.pem ubuntu@<PUBLIC_IP>
+   ```
+3. Pull, rebuild, restart:
+   ```bash
+   cd ~/employee-management-aws-guide
+   git pull
+   cd employee-service
+   mvn clean package -DskipTests
+   pkill -f employee-service-1.0.0.jar
+   nohup java -jar target/employee-service-1.0.0.jar > employee-service.log 2>&1 &
+   ```
+4. Verify: `curl http://localhost:8081/health` on the instance, then `curl http://<ALB_DNS_NAME>/health` from your Mac to confirm the ALB is routing to the updated app.
+5. No target group changes needed — same instance, same registered target.
+
+### Full recovery (instance terminated/lost entirely — the Step 5 incident scenario)
+
+1. **Re-launch EC2** — repeat [Step 3](#-step-3--launch-ec2) exactly: Ubuntu 24.04, `t3.micro`, key pair `springboot-key`, security group `launch-wizard-4` (reuse the existing SG — don't recreate it, its rules already allow the ALB through). Note the new **Public IPv4 address**.
+2. **Install Java + Maven** — repeat [Step 4](#-step-4--install-java).
+3. **Reconnect to RDS** — no changes needed to `database-1` itself; it's a separate resource that outlives the EC2 instance. Just re-verify the RDS security group's inbound rule still lists `launch-wizard-4` as a source (it does, since that SG — not the instance — is what the rule references) — no edit required unless you also recreated the security group.
+4. **Deploy the app** — repeat [Step 6](#-step-6--deploy-spring-boot-jar): `git clone`, export `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`JWT_SECRET`, build, run with `nohup`. Alternatively, since an image already exists in ECR from the CI/CD pipeline work, `docker pull` + `docker run` that image instead of rebuilding from source — faster, and proves the ECR artifact is actually usable for recovery, not just a pipeline exercise.
+5. **Re-attach the IAM role** — repeat [Step 10](#-step-10--create-iam-role-for-ec2): the new instance needs `employee-service-ec2-role` attached again (**EC2** → new instance → **Actions** → **Security** → **Modify IAM role**) before S3 profile-picture upload/download will work — this doesn't carry over automatically to a new instance.
+6. **Re-point the ALB target group** — this is the step that's easy to miss: `employee-service-tg` still has the *old*, now-terminated instance registered (shown as `unhealthy`/`draining`). **EC2** → **Target Groups** → `employee-service-tg` → **Register targets** → select the new instance, port `8081` → **Include as pending below** → **Register pending targets**. Then deregister the old, terminated instance if it's still listed.
+7. **Verify end-to-end**: `curl http://<ALB_DNS_NAME>/health` → `OK`, then re-run the Postman collection's Login → Employee CRUD → S3 profile-picture flow against the ALB DNS name to confirm the full stack (EC2 → RDS, EC2 → S3, ALB → EC2) is healthy again.
+
+---
+
 ## Target Architecture — CI/CD to EKS (planned, in progress)
 
 Everything above is a manually-managed single EC2 instance. The longer-term target replaces that with a proper CI/CD pipeline deploying containers to Kubernetes:
@@ -609,11 +645,11 @@ flowchart TB
 2. ✅ Create an ECR repository, push an image manually first (prove the container works before automating anything)
 3. ✅ Stand up Jenkins — reused an existing local Jenkins install (Homebrew `jenkins-lts`, running on `127.0.0.1:8080`) already set up from a prior unrelated project, rather than provisioning a new EC2 instance for it. No new AWS cost.
 4. ✅ Write the Jenkinsfile: checkout → `mvn test` → `docker build` → push to ECR
-5. ⏳ Stand up an EKS cluster (`eksctl` is the fastest path), write Kubernetes Deployment/Service manifests, wrap them in a Helm chart
+5. 🔄 Stand up an EKS cluster — **attempted, then rolled back** (see below)
 6. Install the AWS Load Balancer Controller in the cluster, wire the Helm chart's Service to provision an ALB via Ingress
 7. Point Jenkins's last pipeline stage at `helm upgrade`
 
-Steps 3-7 not started — RDS and S3 stay as-is either way (EKS pods would connect to the same RDS instance and use the same S3 bucket via a Kubernetes-native IAM mechanism, IRSA, instead of an EC2 instance role).
+Steps 6-7 not started — RDS and S3 would stay as-is either way (EKS pods would connect to the same RDS instance and use the same S3 bucket via a Kubernetes-native IAM mechanism, IRSA, instead of an EC2 instance role).
 
 **Step 1, verified:**
 
@@ -721,15 +757,36 @@ pipeline {
 
 Build #2 result: `Finished: SUCCESS`. Checkout → `mvn clean package` (`BUILD SUCCESS`, 0 tests — none exist yet) → Docker build → pushed `employee-service:584d9bc` and `employee-service:latest` to ECR (digest `sha256:7979fb3...`) → post-build cleanup removed the local images to avoid accumulating disk space on repeated runs.
 
+**Step 5, attempted and rolled back:** stood up an EKS cluster with `eksctl`, hit a chain of real issues, and ultimately tore it all down rather than push further — worth documenting in full since each issue is a genuine lesson, not just noise.
+
+1. **IAM permissions, round 1**: `springboot-s3-user` (the CLI credential used for local commands throughout) had no EKS permissions at all — `eksctl create cluster` failed immediately on `eks:DescribeClusterVersions`. Confirmed via `aws cloudformation list-stacks` that nothing had actually been created — a permissions failure at the very first API call costs nothing.
+
+2. **IAM permissions, round 2**: attached a scoped custom policy (`EKS-Lab-Deployment`) instead of broad access. It was still missing `iam:CreateServiceLinkedRole` — CloudFormation got as far as building the VPC/networking, then failed and auto-rolled-back cleanly (`ROLLBACK_COMPLETE`) when EKS itself needed that permission. The NAT Gateway it had started never finished creating (`CREATE_FAILED — Resource creation cancelled`), so no orphaned billing there either. Rather than keep discovering missing permissions one at a time — `eksctl` also needs EC2, Auto Scaling, and node-role IAM permissions further into the process — switched to `AdministratorAccess` on that user for this personal learning account.
+
+3. **Free Tier instance type restriction**: with permissions sorted, `eksctl create cluster --node-type t3.medium` got much further — control plane created successfully, EKS add-ons (`coredns`, `vpc-cni`, `kube-proxy`) installed — but the managed node group failed: `AsgInstanceLaunchFailures ... The specified instance type is not eligible for Free Tier`. This AWS account is restricted to Free Tier-eligible instance types only; `t3.medium` isn't one.
+
+4. **Retried with `t3.micro`** (free-tier eligible) as a separate `eksctl create nodegroup` against the still-`ACTIVE` control plane, avoiding having to redo the whole cluster. Before this finished, decided to abandon the EKS path — `t3.micro`'s 1GB RAM was a real risk for running Kubernetes system pods (`coredns`, `kube-proxy`, `vpc-cni`) alongside a JVM Spring Boot app, and continuing to debug node sizing wasn't worth the time for a first EKS attempt.
+
+5. **Teardown took two tries.** `eksctl delete cluster` first attempt timed out after ~25 minutes waiting on the node group stack — it had been canceled mid-*creation* earlier (step 4), which left it in an unusually slow state to delete (CloudFormation seems to need an in-progress-creating resource to "settle" before it can be torn down cleanly). The `eksctl` CLI gave up watching, but the AWS-side deletion was still progressing underneath. A second `eksctl delete cluster --wait` picked up where it left off and finished properly ~13 minutes later: `all cluster resources were deleted`. Verified via CLI and console afterward — no cluster, no worker EC2 instances, no EBS volumes, no NAT Gateway.
+
+6. **Incidental EC2 termination.** While the above cleanup was in progress, `employee-service-server` (the original Step 3 instance running the live app) was also terminated. CloudTrail confirms this was a separate, manual `TerminateInstances` call by the account's **root** user — not caused by any `eksctl`/CloudFormation command, none of which ever referenced that instance or its VPC (the EKS cluster used its own separate auto-created VPC). Likely an accidental click while multiple EC2 instances were visible together in the console during cleanup. `database-1` (RDS) and the S3 bucket were both confirmed unaffected — the app itself is stateless, so this needs a relaunch + redeploy, not data recovery.
+
+**Cost impact of the whole attempt**: roughly $0.20-0.40 total — brief control-plane time, a couple of `t3.micro`/`t3.medium` node-minutes, and a NAT Gateway for under an hour. Confirmed nothing was left running afterward.
+
+**Current state**: no EKS cluster, no ECR repository (deleted via console), no EC2 instances at all — `employee-service-server` needs to be relaunched (repeat Step 3) and the app redeployed (repeat Step 6, or `docker pull` from a freshly re-pushed ECR image instead of rebuilding) before the ALB target group has a healthy target again.
+
+**Lessons for next attempt**: check the account's Free Tier instance-type restriction *before* picking a node type; avoid canceling an `eksctl create` mid-flight if at all possible, since deleting a stack that never finished creating is measurably slower and messier than deleting a stable one; and be careful navigating the EC2 console while multiple instances are listed together during a cleanup — it's easy to select the wrong one.
+
 ---
 
 ## What's Next
 
 In order:
 
-1. **Step 13** — Auto Scaling Group (then wire `employee-service-high-cpu` to its scaling policy) — worth reconsidering given the EKS target above makes EC2-level ASG a stepping stone rather than the end state
-2. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
-3. Target architecture (CI/CD → EKS) — longer-term, see above
+1. **Recovery** — `employee-service-server` is currently terminated (see the Step 5 incident above); follow the [Full recovery runbook](#full-recovery-instance-terminatedlost-entirely--the-step-5-incident-scenario) to relaunch and redeploy before anything else
+2. **Step 13** — Auto Scaling Group (then wire `employee-service-high-cpu` to its scaling policy) — worth reconsidering given the EKS target above makes EC2-level ASG a stepping stone rather than the end state
+3. Remaining README phases not yet started: **Phase 7 (SQS)**, **Phase 8 (Redis)**
+4. Target architecture (CI/CD → EKS) — revisit later with a properly sized node type and Free Tier constraints understood upfront; steps 1-4 (Dockerfile, ECR, Jenkins, pipeline) remain valid and reusable
 
 ---
 
